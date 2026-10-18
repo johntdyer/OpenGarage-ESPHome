@@ -25,7 +25,7 @@ def AUTO_LOAD(config):
     if "threshold_controls" in config:
         components.append("number")
     if "generic_setup" in config:
-        components.append("switch")
+        components += ["switch", "number"]
     return components
 DEPENDENCIES = ["esp8266"]
 MULTI_CONF = False
@@ -34,7 +34,8 @@ MAX_THRESHOLD_CM = 450  # Keep in sync with ThresholdSettings::MAX_CM.
 ns = cg.esphome_ns.namespace("opengarage")
 OpenGarageComponent = ns.class_("OpenGarageComponent", cg.Component)
 GenericSetup = ns.class_("GenericSetup", cg.Component)
-SoundSwitch = ns.class_("SoundSwitch", switch.Switch)
+SettingSwitch = ns.class_("SettingSwitch", switch.Switch)
+SettingNumber = ns.class_("SettingNumber", number.Number)
 ControlCommandButton = ns.class_("ControlCommandButton", button.Button)
 PulseCover = ns.class_("PulseCover", cover.Cover)
 Secplus1Cover = ns.class_("Secplus1Cover", cover.Cover)
@@ -361,9 +362,15 @@ CONFIG_SCHEMA = cv.All(
             cv.Required("status"): text_sensor.text_sensor_schema(entity_category="diagnostic"),
             # Plain owner settings stored in the tail slot; never upstream switch restore.
             cv.Required("warning_sound"): switch.switch_schema(
-                SoundSwitch, entity_category="config", icon="mdi:bullhorn", block_inverted=True),
+                SettingSwitch, entity_category="config", icon="mdi:bullhorn", block_inverted=True),
+            cv.Required("warning_time"): number.number_schema(
+                SettingNumber, entity_category="config", unit_of_measurement="s", icon="mdi:timer-sand").extend({
+                    cv.Optional("mode", default="BOX"): cv.enum({"BOX": number.NumberMode.NUMBER_MODE_BOX}, upper=True)}),
+            cv.Required("warning_tone"): number.number_schema(
+                SettingNumber, entity_category="config", unit_of_measurement="Hz", icon="mdi:sine-wave").extend({
+                    cv.Optional("mode", default="BOX"): cv.enum({"BOX": number.NumberMode.NUMBER_MODE_BOX}, upper=True)}),
             cv.Required("startup_sound"): switch.switch_schema(
-                SoundSwitch, entity_category="config", icon="mdi:music-note", block_inverted=True),
+                SettingSwitch, entity_category="config", icon="mdi:music-note", block_inverted=True),
         }),
         cv.Optional("state_source", default="distance"): cv.enum(SOURCES, lower=True),
         cv.Optional("mounting", default="ceiling"): cv.enum(MOUNTINGS, lower=True),
@@ -713,10 +720,13 @@ async def to_code(config):
                                 await cg.get_variable(conf["web_server_id"]))
         await cg.register_component(setup, conf)
         cg.add(setup.set_status_sensor(await text_sensor.new_text_sensor(conf["status"])))
-        sounds = [await switch.new_switch(conf[key], setup, cg.RawExpression(flag)) for key, flag in
-                  (("warning_sound", "esphome::opengarage::DeviceSettings::WARNING_MUTED"),
-                   ("startup_sound", "esphome::opengarage::DeviceSettings::STARTUP_MUTED"))]
-        cg.add(setup.set_sound_switches(*sounds))
+        switches = [await switch.new_switch(conf[key], setup, cg.RawExpression(flag)) for key, flag in
+                    (("warning_sound", "esphome::opengarage::DeviceSettings::WARNING_MUTED"),
+                     ("startup_sound", "esphome::opengarage::DeviceSettings::STARTUP_MUTED"))]
+        cg.add(setup.set_setting_switches(*switches))
+        time = await number.new_number(conf["warning_time"], setup, False, min_value=0, max_value=30, step=1)
+        tone = await number.new_number(conf["warning_tone"], setup, True, min_value=200, max_value=5000, step=50)
+        cg.add(setup.set_setting_numbers(time, tone))
         # Keep the original mode and threshold records first. All later generic
         # versions must retain this allocation order and fixed record size.
         cg.add(setup.load_credentials())

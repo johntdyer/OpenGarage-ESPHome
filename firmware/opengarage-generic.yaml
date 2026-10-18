@@ -49,5 +49,9 @@ opengarage:
       name: Device Setup
     warning_sound:
       name: Door Warning Sound
+    warning_time:
+      name: Door Warning Time
+    warning_tone:
+      name: Door Warning Tone
     startup_sound:
       name: Startup Sounds

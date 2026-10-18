@@ -9,6 +9,7 @@
 #include "esphome/components/wifi/wifi_component.h"
 #include "generic_setup_page.h"
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 
 namespace esphome::opengarage {
@@ -33,7 +34,8 @@ bool same_secret(const std::string &a, const char *b) {
 }
 }
 
-void SoundSwitch::write_state(bool state) { parent_->request_sound(flag_, state); }
+void SettingSwitch::write_state(bool state) { parent_->request_setting(flag_, state); }
+void SettingNumber::control(float value) { parent_->request_number(tone_, value); }
 
 void GenericSetup::load_credentials() {
   if (global_preferences != nullptr) {
@@ -48,8 +50,7 @@ void GenericSetup::load_credentials() {
   if (configured_ && global_preferences != nullptr && settings_slot_.load(&settings_)) {
     // Owner settings apply only to a provisioned device; first-use setup keeps
     // the documented opengarage-xxxxxx AP name. Names take effect at boot only.
-    AudioPolicy::warning_muted = settings_.flag(DeviceSettings::WARNING_MUTED);
-    AudioPolicy::startup_muted = settings_.flag(DeviceSettings::STARTUP_MUTED);
+    apply_policy_();
     open_dashboard_ = settings_.flag(DeviceSettings::OPEN_DASHBOARD);
     std::memcpy(active_name_, settings_.hostname, sizeof(active_name_));
     std::memcpy(active_friendly_, settings_.friendly, sizeof(active_friendly_));
@@ -110,7 +111,7 @@ void GenericSetup::setup() {
     ap.set_password(credentials_.admin);
     wifi::global_wifi_component->set_ap(ap);
   }
-  publish_sounds_();
+  publish_switches_();
   if (status_) status_->publish_state(configured_ ? (wifi_recovery_ ?
       "Wi-Fi recovery AP; sign in as admin and configure Wi-Fi; outputs inhibited" : "Configured; admin setup page: /og/setup") :
       "Setup required; open setup AP within 10 minutes; outputs inhibited");
@@ -220,9 +221,18 @@ void GenericSetup::forward_dashboard_(AsyncWebServerRequest *request) {
   web_->handleRequest(request);  // Bypasses only the upstream auth middleware wrapper.
 }
 
-void GenericSetup::publish_sounds_() {
+void GenericSetup::apply_policy_() {
+  AudioPolicy::warning_muted = settings_.flag(DeviceSettings::WARNING_MUTED);
+  AudioPolicy::warning_ms = settings_.warning_s() < 0 ? -1 : settings_.warning_s() * 1000;
+  AudioPolicy::warning_hz = settings_.tone_hz() ? settings_.tone_hz() : 1000;
+  AudioPolicy::startup_muted = settings_.flag(DeviceSettings::STARTUP_MUTED);
+}
+
+void GenericSetup::publish_switches_() {
   if (warning_switch_) warning_switch_->publish_state(!settings_.flag(DeviceSettings::WARNING_MUTED));
   if (startup_switch_) startup_switch_->publish_state(!settings_.flag(DeviceSettings::STARTUP_MUTED));
+  if (time_number_) time_number_->publish_state(AudioPolicy::effective_warning_ms() / 1000);
+  if (tone_number_) tone_number_->publish_state(AudioPolicy::warning_hz);
 }
 
 bool GenericSetup::save_settings_(const DeviceSettings &next) {
@@ -233,16 +243,27 @@ bool GenericSetup::save_settings_(const DeviceSettings &next) {
   return false;
 }
 
-void GenericSetup::request_sound(uint32_t muted_flag, bool audible) {
+void GenericSetup::request_number(bool tone, float value) {
+  const bool whole = std::isfinite(value) && std::floor(value) == value;
+  const bool ok = whole && (tone ? value >= DeviceSettings::MIN_TONE_HZ && value <= DeviceSettings::MAX_TONE_HZ :
+                                   value >= 0 && value <= DeviceSettings::MAX_WARNING_S);
+  if (ok && configured_ && !failed_ && !recovery_inhibited_ && !recovery_committed_ && parent_->button_recovery_allowed()) {
+    auto next = settings_;
+    if (tone) next.set_tone_hz(uint32_t(value) == 1000 ? 0 : uint32_t(value));
+    else next.set_warning_s(uint32_t(value) * 1000 == AudioPolicy::default_warning_ms ? -1 : int32_t(value));
+    if (next.flags != settings_.flags && save_settings_(next)) apply_policy_();
+  }
+  publish_switches_();
+}
+
+void GenericSetup::request_setting(uint32_t off_flag, bool on) {
+  // A change applies to the next request; a warning already underway keeps its timing.
   if (configured_ && !failed_ && !recovery_inhibited_ && !recovery_committed_ && parent_->button_recovery_allowed()) {
     auto next = settings_;
-    next.set_flag(muted_flag, !audible);
-    if (next.flags != settings_.flags && save_settings_(next)) {
-      AudioPolicy::warning_muted = settings_.flag(DeviceSettings::WARNING_MUTED);
-      AudioPolicy::startup_muted = settings_.flag(DeviceSettings::STARTUP_MUTED);
-    }
+    next.set_flag(off_flag, !on);
+    if (next.flags != settings_.flags && save_settings_(next)) apply_policy_();
   }
-  publish_sounds_();
+  publish_switches_();
 }
 
 void GenericSetup::handle_settings_post_(AsyncWebServerRequest *request) {

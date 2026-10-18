@@ -1,17 +1,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include <Arduino.h>
+#include <cstdint>
 
 namespace esphome::opengarage {
-// Owner-selected sound preferences, loaded before App.setup() by generic setup.
-// Muting a door warning keeps its full countdown and Cancel window; only GPIO13
-// stays silent. Recovery threshold beeps and the audible IP report are always on.
+// Owner-selected warning/sound preferences, loaded before App.setup() by generic
+// setup. A muted warning keeps its countdown and Cancel window; a zero warning
+// time dispatches at the next service (Security+ still waits up to 1 s for an
+// idle bus slot). Recovery threshold beeps and the audible IP report are always on.
 struct AudioPolicy {
   static inline bool warning_muted{false};
   static inline bool startup_muted{false};
+  static inline uint32_t default_warning_ms{5000};  // YAML warning_time.
+  static inline int32_t warning_ms{-1};             // Owner override; -1 = default.
+  static inline uint16_t warning_hz{1000};          // Stock 1 kHz.
+  static uint32_t effective_warning_ms() { return warning_ms < 0 ? default_warning_ms : uint32_t(warning_ms); }
 };
 
 inline void warning_burst() {
-  if (!AudioPolicy::warning_muted) tone(13, 1000, 500);  // Stock 1 kHz, 500 ms envelope.
+  if (!AudioPolicy::warning_muted) tone(13, AudioPolicy::warning_hz, 500);  // Stock 500 ms envelope.
 }
 }  // namespace esphome::opengarage

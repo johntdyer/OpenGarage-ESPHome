@@ -185,6 +185,7 @@ class OpenGarageComponent : public Component
   void set_control_pins(InternalGPIOPin *door, InternalGPIOPin *buzzer) { door_pin_ = door; buzzer_pin_ = buzzer; }
   void set_control_timing(uint32_t warning, uint32_t pulse, uint32_t lockout) {
     control_config_.warning_ms = warning; control_config_.pulse_ms = pulse; control_config_.lockout_ms = lockout;
+    AudioPolicy::default_warning_ms = warning;
   }
   void set_bench_mode(bool value) { control_config_.bench_mode = value; }
   void set_button_recovery(ButtonRecovery *value) { control_button_.set_recovery(value); }

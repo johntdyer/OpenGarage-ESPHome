@@ -9,21 +9,32 @@
 #include "opengarage_component.h"
 #include "esphome/components/api/api_server.h"
 #include "esphome/components/esphome/ota/ota_esphome.h"
+#include "esphome/components/number/number.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/web_server/web_server.h"
 #include "esphome/components/web_server_base/web_server_base.h"
 
 namespace esphome::opengarage {
 class GenericSetup;
-// Owner sound preference. On = audible. Never optimistic: the parent persists
-// first and republishes the stored value, including after a refused write.
-class SoundSwitch : public switch_::Switch {
+// Owner warning/sound preference. On = stock behavior (flag clear). Never
+// optimistic: the parent persists first and republishes the stored value.
+class SettingSwitch : public switch_::Switch {
  public:
-  SoundSwitch(GenericSetup *parent, uint32_t muted_flag) : parent_(parent), flag_(muted_flag) {}
+  SettingSwitch(GenericSetup *parent, uint32_t off_flag) : parent_(parent), flag_(off_flag) {}
  protected:
   void write_state(bool state) override;
   GenericSetup *parent_;
   uint32_t flag_;
+};
+
+// Owner warning time (s) or tone (Hz). Same persist-then-publish contract.
+class SettingNumber : public number::Number {
+ public:
+  SettingNumber(GenericSetup *parent, bool tone) : parent_(parent), tone_(tone) {}
+ protected:
+  void control(float value) override;
+  GenericSetup *parent_;
+  bool tone_;
 };
 
 class GenericSetup : public Component, public AsyncWebHandler, public ButtonRecovery {
@@ -36,8 +47,12 @@ class GenericSetup : public Component, public AsyncWebHandler, public ButtonReco
   void loop() override;
   float get_setup_priority() const override { return setup_priority::BUS + 1.0f; }
   void set_status_sensor(text_sensor::TextSensor *sensor) { status_ = sensor; }
-  void set_sound_switches(SoundSwitch *warning, SoundSwitch *startup) { warning_switch_ = warning; startup_switch_ = startup; }
-  void request_sound(uint32_t muted_flag, bool audible);
+  void set_setting_switches(SettingSwitch *warning, SettingSwitch *startup) {
+    warning_switch_ = warning; startup_switch_ = startup;
+  }
+  void set_setting_numbers(SettingNumber *time, SettingNumber *tone) { time_number_ = time; tone_number_ = tone; }
+  void request_setting(uint32_t off_flag, bool on);
+  void request_number(bool tone, float value);
   bool canHandle(AsyncWebServerRequest *request) const override;
   void handleRequest(AsyncWebServerRequest *request) override;
   // ESPAsyncWebServer otherwise discards URL-encoded POST fields before dispatch.
@@ -57,13 +72,15 @@ class GenericSetup : public Component, public AsyncWebHandler, public ButtonReco
   bool open_dashboard_route_(AsyncWebServerRequest *request) const;
   void forward_dashboard_(AsyncWebServerRequest *request);
   bool save_settings_(const DeviceSettings &next);
-  void publish_sounds_();
+  void publish_switches_();
+  void apply_policy_();
   void handle_settings_post_(AsyncWebServerRequest *request);
   OpenGarageComponent *parent_;
   api::APIServer *api_;
   esphome::ESPHomeOTAComponent *ota_;
   web_server::WebServer *web_;
-  SoundSwitch *warning_switch_{nullptr}, *startup_switch_{nullptr};
+  SettingSwitch *warning_switch_{nullptr}, *startup_switch_{nullptr};
+  SettingNumber *time_number_{nullptr}, *tone_number_{nullptr};
   DeviceSettingsSlot settings_slot_;
   DeviceSettings settings_{};       // Saved record; name edits apply after restart.
   char active_name_[32]{}, active_friendly_[40]{};  // Stable App name storage for this boot.

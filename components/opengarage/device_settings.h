@@ -18,13 +18,19 @@ struct DeviceSettings {
   static constexpr uint32_t TYPE = 0x4F475302U;   // Preference checksum seed.
   static constexpr uint32_t WARNING_MUTED = 1U, STARTUP_MUTED = 2U, OPEN_DASHBOARD = 4U;
   static constexpr uint32_t KNOWN_FLAGS = WARNING_MUTED | STARTUP_MUTED | OPEN_DASHBOARD;
+  static constexpr uint32_t MAX_WARNING_S = 30, MIN_TONE_HZ = 200, MAX_TONE_HZ = 5000;
   uint32_t magic{MAGIC};
+  // Bits 0-7 flags; 8-15 warning seconds + 1 (0 = YAML default); 16-28 tone Hz (0 = 1 kHz).
   uint32_t flags{0};
   char hostname[32]{};  // Empty: compiled MAC-suffixed name.
   char friendly[40]{};  // Empty: compiled friendly name.
 
   bool flag(uint32_t bit) const { return (flags & bit) != 0; }
   void set_flag(uint32_t bit, bool on) { flags = on ? (flags | bit) : (flags & ~bit); }
+  int32_t warning_s() const { const uint32_t code = (flags >> 8) & 0xFFU; return code ? int32_t(code - 1) : -1; }
+  void set_warning_s(int32_t s) { flags = (flags & ~0xFF00U) | (uint32_t(s < 0 ? 0 : s + 1) << 8); }
+  uint32_t tone_hz() const { return flags >> 16; }  // 0 = stock.
+  void set_tone_hz(uint32_t hz) { flags = (flags & 0xFFFFU) | (hz << 16); }
   // DNS label usable by mDNS, DHCP and the ESP8266 32-byte hostname buffer.
   static bool hostname_valid(const char *name, size_t length) {
     if (length == 0 || length > 31 || name[0] == '-' || name[length - 1] == '-') return false;
@@ -46,7 +52,9 @@ struct DeviceSettings {
   bool valid() const {
     const char *h_end = static_cast<const char *>(std::memchr(hostname, 0, sizeof(hostname)));
     const char *f_end = static_cast<const char *>(std::memchr(friendly, 0, sizeof(friendly)));
-    if (magic != MAGIC || (flags & ~KNOWN_FLAGS) || !h_end || !f_end) return false;
+    if (magic != MAGIC || (flags & 0xFFU & ~KNOWN_FLAGS) || !h_end || !f_end) return false;
+    if (warning_s() > int32_t(MAX_WARNING_S) || (tone_hz() != 0 && (tone_hz() < MIN_TONE_HZ || tone_hz() > MAX_TONE_HZ)))
+      return false;
     return (h_end == hostname || hostname_valid(hostname, h_end - hostname)) && friendly_valid(friendly, f_end - friendly);
   }
 };

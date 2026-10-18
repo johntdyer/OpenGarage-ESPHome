@@ -28,9 +28,11 @@ class PulseOutputs : public ControlOutputs {
     last_burst_ = 0;
     bursts_ = 1;
     required_bursts_ = (minimum_ms + 999) / 1000;
+    if (required_bursts_ == 0) { bursts_ = 0; return; }  // Owner skipped the countdown.
     warning_burst();  // Independent finite-duration 1 kHz burst, stock envelope.
   }
   bool warning_tick(uint32_t elapsed) override {
+    if (ready_ && warning_ && required_bursts_ == 0) return true;
     if (!ready_ || !warning_ || uint32_t(elapsed - last_burst_) < 1000) return false;
     if (bursts_ >= required_bursts_) return true;
     ++bursts_;
