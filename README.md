@@ -1,11 +1,11 @@
 # OpenGarage for ESPHome
 
 > **This is a personal fork of [OpenGarage/OpenGarage-ESPHome](https://github.com/OpenGarage/OpenGarage-ESPHome).**
-> It adds owner settings that the stock OpenGarage firmware let you control but the upstream ESPHome firmware does not (see [upstream issue #2](https://github.com/OpenGarage/OpenGarage-ESPHome/issues/2)). Upstream does not plan to merge these changes, so they are maintained here on the `feature/owner-settings` branch. `main` tracks upstream unchanged.
+> It adds owner settings that the stock OpenGarage firmware let you control but the upstream ESPHome firmware does not (see [upstream issue #2](https://github.com/OpenGarage/OpenGarage-ESPHome/issues/2)). Upstream does not plan to merge these changes, so they are maintained here. This fork's `main` is upstream plus the changes below; upstream updates are merged in periodically.
 
 ## Fork Changes
 
-All changes are opt-in: the defaults match upstream, and nothing changes until you edit a setting. Settings are saved on the device and survive power loss, reboots, firmware updates and Wi-Fi reset. Factory reset clears them.
+All changes are opt-in: the defaults match upstream, and nothing changes until you edit a setting. Settings are saved on the device and survive power loss, reboots, firmware updates and Wi-Fi reset. Factory reset clears them. Configuration entities apply immediately; a door request already counting down keeps its timing.
 
 **Home Assistant / web dashboard (Configuration)**
 
@@ -13,7 +13,7 @@ All changes are opt-in: the defaults match upstream, and nothing changes until y
 | --- | --- | --- |
 | Door Warning Sound | on / off | Silence the buzzer before door moves; the delay still runs |
 | Door Warning Time | 0–30 s, default 5 | Length of the pre-move countdown; 0 sends the command immediately |
-| Door Warning Tone | 200–5000 Hz, default 1000 | Buzzer pitch |
+| Door Warning Tone | 200–5000 Hz in 50 Hz steps, default 1000 | Buzzer pitch |
 | Door Command Cooldown | 5–120 s, default 30 | How long Open/Close are refused after a door command; Toggle is unaffected |
 | Startup Sounds | on / off | Skip the boot/connect tunes |
 
@@ -32,12 +32,14 @@ Details are in [Controls and Operation](docs/operation.md) and [Device Settings]
 **Building:** this fork has no prebuilt releases. Build it yourself (see [Building and Contributing](docs/development.md)):
 
 ```sh
-git checkout feature/owner-settings
+git clone https://github.com/johntdyer/OpenGarage-ESPHome.git && cd OpenGarage-ESPHome
 python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
 make compile PYTHON=.venv/bin/python
 ```
 
 Upload `firmware/.esphome/build/opengarage/.pioenvs/opengarage/firmware.bin` through `/og/setup` → Firmware Update. Saved credentials, Wi-Fi and calibration are kept.
+
+**Keeping up with upstream:** `git fetch upstream && git merge upstream/main`, then rebuild. If upstream changes its pinned ESPHome version, recheck the internals this fork relies on (listed in [Building and Contributing](docs/development.md#pinned-framework-contracts)) before flashing.
 
 ---
 
