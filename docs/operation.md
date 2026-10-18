@@ -26,7 +26,8 @@ If a Security+ 2.0 opener stops responding, OG retries status queries automatica
 - Door requests normally sound a five-second buzzer warning (adjustable below). A Toggle during fresh, confirmed Security+ Opening/Closing skips the warning. Dry-contact Toggle always warns. A warning already underway is not shortened when motion is subsequently detected.
 - **Door Warning Sound** (Configuration) silences the warning buzzer. The five-second countdown, Control Phase and **Cancel Pending Action** still apply; only the sound is removed.
 - **Door Warning Time** (Configuration, 0–30 s, default 5) sets the countdown. One beep sounds per second. At **0** a request is sent at once without any beep (Security+ may still wait up to a second for a free bus slot), so Cancel Pending Action has no practical window. Cooldown, state and repeat guards are unchanged.
-- **Door Warning Tone** (Configuration, 200–5000 Hz, default 1000) sets the beep pitch. Small piezo buzzers are loudest near 2000–4000 Hz.
+- **Door Command Cooldown** (Configuration, 5–120 s, default 30) sets how long Open/Close requests are refused after a door command (shown as **Open/Close cooldown; Toggle available**). Set it to at least your door's full travel time so a directional request never acts on a stale position. Toggle is never blocked by it. A change applies immediately, including to a cooldown in progress.
+- **Door Warning Tone** (Configuration, 200–5000 Hz in 50 Hz steps, default 1000) sets the beep pitch. Small piezo buzzers are loudest near 2000–4000 Hz.
 - Keep an audible warning whenever someone may be near the door or you cannot see it move; never use unwarned closing for unattended automations. Changes apply to the next request.
 - **Cancel Pending Action** cancels before a command is dispatched. It cannot undo a sent command or stop door movement.
 

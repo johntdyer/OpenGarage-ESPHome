@@ -14,6 +14,7 @@ All changes are opt-in: the defaults match upstream, and nothing changes until y
 | Door Warning Sound | on / off | Silence the buzzer before door moves; the delay still runs |
 | Door Warning Time | 0–30 s, default 5 | Length of the pre-move countdown; 0 sends the command immediately |
 | Door Warning Tone | 200–5000 Hz, default 1000 | Buzzer pitch |
+| Door Command Cooldown | 5–120 s, default 30 | How long Open/Close are refused after a door command; Toggle is unaffected |
 | Startup Sounds | on / off | Skip the boot/connect tunes |
 
 **Setup page (`/og/setup` → Device Settings)**
@@ -24,7 +25,7 @@ All changes are opt-in: the defaults match upstream, and nothing changes until y
 
 Details are in [Controls and Operation](docs/operation.md) and [Device Settings](docs/install.md#device-settings).
 
-**Safety:** a shorter, silent or zero warning removes the audible alert before the door moves. Keep a warning whenever someone may be near the door or it is out of sight, and don't use unwarned closing for unattended automations.
+**Safety:** a shorter, silent or zero warning removes the audible alert before the door moves, and a cooldown shorter than your door's travel time lets Open/Close act on a stale position. Keep a warning whenever someone may be near the door or it is out of sight, and don't use unwarned closing for unattended automations.
 
 **Storage:** the new settings live in a fixed, checksummed slot at the end of the ESP8266 preference sector, so existing Wi-Fi, HA key and calibration records are not moved by an update. If you install upstream 0.10.26 or older afterwards, first set a password of at least 12 characters; older firmware treats shorter ones as unprovisioned.
 

@@ -27,14 +27,16 @@ class SettingSwitch : public switch_::Switch {
   uint32_t flag_;
 };
 
-// Owner warning time (s) or tone (Hz). Same persist-then-publish contract.
+// Owner warning time (s), tone (Hz) or Open/Close cooldown (s). Same
+// persist-then-publish contract.
+enum class SettingKind : uint8_t { WARNING_TIME, WARNING_TONE, COOLDOWN };
 class SettingNumber : public number::Number {
  public:
-  SettingNumber(GenericSetup *parent, bool tone) : parent_(parent), tone_(tone) {}
+  SettingNumber(GenericSetup *parent, SettingKind kind) : parent_(parent), kind_(kind) {}
  protected:
   void control(float value) override;
   GenericSetup *parent_;
-  bool tone_;
+  SettingKind kind_;
 };
 
 class GenericSetup : public Component, public AsyncWebHandler, public ButtonRecovery {
@@ -50,9 +52,11 @@ class GenericSetup : public Component, public AsyncWebHandler, public ButtonReco
   void set_setting_switches(SettingSwitch *warning, SettingSwitch *startup) {
     warning_switch_ = warning; startup_switch_ = startup;
   }
-  void set_setting_numbers(SettingNumber *time, SettingNumber *tone) { time_number_ = time; tone_number_ = tone; }
+  void set_setting_numbers(SettingNumber *time, SettingNumber *tone, SettingNumber *cooldown) {
+    time_number_ = time; tone_number_ = tone; cooldown_number_ = cooldown;
+  }
   void request_setting(uint32_t off_flag, bool on);
-  void request_number(bool tone, float value);
+  void request_number(SettingKind kind, float value);
   bool canHandle(AsyncWebServerRequest *request) const override;
   void handleRequest(AsyncWebServerRequest *request) override;
   // ESPAsyncWebServer otherwise discards URL-encoded POST fields before dispatch.
@@ -80,7 +84,7 @@ class GenericSetup : public Component, public AsyncWebHandler, public ButtonReco
   esphome::ESPHomeOTAComponent *ota_;
   web_server::WebServer *web_;
   SettingSwitch *warning_switch_{nullptr}, *startup_switch_{nullptr};
-  SettingNumber *time_number_{nullptr}, *tone_number_{nullptr};
+  SettingNumber *time_number_{nullptr}, *tone_number_{nullptr}, *cooldown_number_{nullptr};
   DeviceSettingsSlot settings_slot_;
   DeviceSettings settings_{};       // Saved record; name edits apply after restart.
   char active_name_[32]{}, active_friendly_[40]{};  // Stable App name storage for this boot.

@@ -14,13 +14,16 @@ namespace esphome::opengarage {
 // checksum seed rejects stale or foreign data; writes are refused if dynamic
 // allocation ever reaches the tail. Factory reset erases it; Wi-Fi reset keeps it.
 struct DeviceSettings {
-  static constexpr uint32_t MAGIC = 0x4F475301U;  // OG owner settings, format 1.
+  static constexpr uint32_t MAGIC = 0x4F475303U;     // OG owner settings, format 2.
+  static constexpr uint32_t MAGIC_V1 = 0x4F475301U;  // Format 1: tone Hz in bits 16-28, no cooldown.
   static constexpr uint32_t TYPE = 0x4F475302U;   // Preference checksum seed.
   static constexpr uint32_t WARNING_MUTED = 1U, STARTUP_MUTED = 2U, OPEN_DASHBOARD = 4U;
   static constexpr uint32_t KNOWN_FLAGS = WARNING_MUTED | STARTUP_MUTED | OPEN_DASHBOARD;
-  static constexpr uint32_t MAX_WARNING_S = 30, MIN_TONE_HZ = 200, MAX_TONE_HZ = 5000;
+  static constexpr uint32_t MAX_WARNING_S = 30, MIN_TONE_HZ = 200, MAX_TONE_HZ = 5000, TONE_STEP_HZ = 50;
+  static constexpr uint32_t MIN_COOLDOWN_S = 5, MAX_COOLDOWN_S = 120;  // ActionController's accepted range.
   uint32_t magic{MAGIC};
-  // Bits 0-7 flags; 8-15 warning seconds + 1 (0 = YAML default); 16-28 tone Hz (0 = 1 kHz).
+  // Bits 0-7 flags; 8-15 warning seconds + 1; 16-22 tone Hz / 50; 23-30 cooldown
+  // seconds. Zero in any field means the YAML/stock default.
   uint32_t flags{0};
   char hostname[32]{};  // Empty: compiled MAC-suffixed name.
   char friendly[40]{};  // Empty: compiled friendly name.
@@ -29,8 +32,17 @@ struct DeviceSettings {
   void set_flag(uint32_t bit, bool on) { flags = on ? (flags | bit) : (flags & ~bit); }
   int32_t warning_s() const { const uint32_t code = (flags >> 8) & 0xFFU; return code ? int32_t(code - 1) : -1; }
   void set_warning_s(int32_t s) { flags = (flags & ~0xFF00U) | (uint32_t(s < 0 ? 0 : s + 1) << 8); }
-  uint32_t tone_hz() const { return flags >> 16; }  // 0 = stock.
-  void set_tone_hz(uint32_t hz) { flags = (flags & 0xFFFFU) | (hz << 16); }
+  uint32_t tone_hz() const { return ((flags >> 16) & 0x7FU) * TONE_STEP_HZ; }  // 0 = stock.
+  void set_tone_hz(uint32_t hz) { flags = (flags & ~(0x7FU << 16)) | ((hz / TONE_STEP_HZ) << 16); }
+  uint32_t cooldown_s() const { return (flags >> 23) & 0xFFU; }  // 0 = YAML default.
+  void set_cooldown_s(uint32_t s) { flags = (flags & ~(0xFFU << 23)) | (s << 23); }
+  // In RAM only; the next save writes format 2.
+  void migrate_v1() {
+    const uint32_t hz = flags >> 16;
+    magic = MAGIC;
+    flags &= 0xFFFFU;
+    set_tone_hz((hz + TONE_STEP_HZ / 2) / TONE_STEP_HZ * TONE_STEP_HZ);
+  }
   // DNS label usable by mDNS, DHCP and the ESP8266 32-byte hostname buffer.
   static bool hostname_valid(const char *name, size_t length) {
     if (length == 0 || length > 31 || name[0] == '-' || name[length - 1] == '-') return false;
@@ -53,7 +65,9 @@ struct DeviceSettings {
     const char *h_end = static_cast<const char *>(std::memchr(hostname, 0, sizeof(hostname)));
     const char *f_end = static_cast<const char *>(std::memchr(friendly, 0, sizeof(friendly)));
     if (magic != MAGIC || (flags & 0xFFU & ~KNOWN_FLAGS) || !h_end || !f_end) return false;
-    if (warning_s() > int32_t(MAX_WARNING_S) || (tone_hz() != 0 && (tone_hz() < MIN_TONE_HZ || tone_hz() > MAX_TONE_HZ)))
+    if ((flags >> 31) || warning_s() > int32_t(MAX_WARNING_S) ||
+        (tone_hz() != 0 && (tone_hz() < MIN_TONE_HZ || tone_hz() > MAX_TONE_HZ)) ||
+        (cooldown_s() != 0 && (cooldown_s() < MIN_COOLDOWN_S || cooldown_s() > MAX_COOLDOWN_S)))
       return false;
     return (h_end == hostname || hostname_valid(hostname, h_end - hostname)) && friendly_valid(friendly, f_end - friendly);
   }
@@ -73,7 +87,13 @@ class DeviceSettingsSlot {
   }
   bool load(DeviceSettings *settings) {
     DeviceSettings loaded{};
-    if (!backend_.load(reinterpret_cast<uint8_t *>(&loaded), sizeof(loaded)) || !loaded.valid()) return false;
+    if (!backend_.load(reinterpret_cast<uint8_t *>(&loaded), sizeof(loaded))) return false;
+    if (loaded.magic == DeviceSettings::MAGIC_V1) {
+      const uint32_t hz = loaded.flags >> 16;  // Format 1 range check before repacking.
+      if (hz != 0 && (hz < DeviceSettings::MIN_TONE_HZ || hz > DeviceSettings::MAX_TONE_HZ)) return false;
+      loaded.migrate_v1();
+    }
+    if (!loaded.valid()) return false;
     *settings = loaded;
     return true;
   }

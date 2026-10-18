@@ -112,7 +112,9 @@ class ActionController {
     last_service_ = now;
     inputs_seen_ = true;
     if (dispatch_seen_ && uint32_t(now - dispatched_at_) >= REPEAT_GUARD_MS) dispatch_seen_ = false;
-    if (cooldown_ && uint32_t(now - dispatched_at_) >= config_.lockout_ms) cooldown_ = false;
+    // An owner cooldown (5-120 s, the same range configure() accepts) applies at once.
+    const uint32_t lockout = AudioPolicy::lockout_ms < 0 ? config_.lockout_ms : uint32_t(AudioPolicy::lockout_ms);
+    if (cooldown_ && uint32_t(now - dispatched_at_) >= lockout) cooldown_ = false;
     if (stopped_) return;
     if (!config_.bench_mode && config_valid_ && !manually_disabled_ && !armed_ &&
         hardware_ok_) {

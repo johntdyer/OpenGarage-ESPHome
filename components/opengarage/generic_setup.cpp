@@ -35,7 +35,7 @@ bool same_secret(const std::string &a, const char *b) {
 }
 
 void SettingSwitch::write_state(bool state) { parent_->request_setting(flag_, state); }
-void SettingNumber::control(float value) { parent_->request_number(tone_, value); }
+void SettingNumber::control(float value) { parent_->request_number(kind_, value); }
 
 void GenericSetup::load_credentials() {
   if (global_preferences != nullptr) {
@@ -225,6 +225,7 @@ void GenericSetup::apply_policy_() {
   AudioPolicy::warning_muted = settings_.flag(DeviceSettings::WARNING_MUTED);
   AudioPolicy::warning_ms = settings_.warning_s() < 0 ? -1 : settings_.warning_s() * 1000;
   AudioPolicy::warning_hz = settings_.tone_hz() ? settings_.tone_hz() : 1000;
+  AudioPolicy::lockout_ms = settings_.cooldown_s() ? int32_t(settings_.cooldown_s() * 1000) : -1;
   AudioPolicy::startup_muted = settings_.flag(DeviceSettings::STARTUP_MUTED);
 }
 
@@ -233,6 +234,8 @@ void GenericSetup::publish_switches_() {
   if (startup_switch_) startup_switch_->publish_state(!settings_.flag(DeviceSettings::STARTUP_MUTED));
   if (time_number_) time_number_->publish_state(AudioPolicy::effective_warning_ms() / 1000);
   if (tone_number_) tone_number_->publish_state(AudioPolicy::warning_hz);
+  if (cooldown_number_) cooldown_number_->publish_state(
+      (AudioPolicy::lockout_ms < 0 ? AudioPolicy::default_lockout_ms : uint32_t(AudioPolicy::lockout_ms)) / 1000);
 }
 
 bool GenericSetup::save_settings_(const DeviceSettings &next) {
@@ -243,14 +246,22 @@ bool GenericSetup::save_settings_(const DeviceSettings &next) {
   return false;
 }
 
-void GenericSetup::request_number(bool tone, float value) {
-  const bool whole = std::isfinite(value) && std::floor(value) == value;
-  const bool ok = whole && (tone ? value >= DeviceSettings::MIN_TONE_HZ && value <= DeviceSettings::MAX_TONE_HZ :
-                                   value >= 0 && value <= DeviceSettings::MAX_WARNING_S);
+void GenericSetup::request_number(SettingKind kind, float value) {
+  bool ok = std::isfinite(value) && std::floor(value) == value;
+  const auto v = ok ? uint32_t(value) : 0U;
+  switch (kind) {
+    case SettingKind::WARNING_TIME: ok = ok && value >= 0 && v <= DeviceSettings::MAX_WARNING_S; break;
+    case SettingKind::WARNING_TONE:
+      ok = ok && v >= DeviceSettings::MIN_TONE_HZ && v <= DeviceSettings::MAX_TONE_HZ && v % DeviceSettings::TONE_STEP_HZ == 0;
+      break;
+    case SettingKind::COOLDOWN: ok = ok && v >= DeviceSettings::MIN_COOLDOWN_S && v <= DeviceSettings::MAX_COOLDOWN_S; break;
+  }
   if (ok && configured_ && !failed_ && !recovery_inhibited_ && !recovery_committed_ && parent_->button_recovery_allowed()) {
     auto next = settings_;
-    if (tone) next.set_tone_hz(uint32_t(value) == 1000 ? 0 : uint32_t(value));
-    else next.set_warning_s(uint32_t(value) * 1000 == AudioPolicy::default_warning_ms ? -1 : int32_t(value));
+    // A value equal to the default stores "default", so later YAML changes still apply.
+    if (kind == SettingKind::WARNING_TONE) next.set_tone_hz(v == 1000 ? 0 : v);
+    else if (kind == SettingKind::COOLDOWN) next.set_cooldown_s(v * 1000 == AudioPolicy::default_lockout_ms ? 0 : v);
+    else next.set_warning_s(v * 1000 == AudioPolicy::default_warning_ms ? -1 : int32_t(v));
     if (next.flags != settings_.flags && save_settings_(next)) apply_policy_();
   }
   publish_switches_();

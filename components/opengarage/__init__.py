@@ -36,6 +36,7 @@ OpenGarageComponent = ns.class_("OpenGarageComponent", cg.Component)
 GenericSetup = ns.class_("GenericSetup", cg.Component)
 SettingSwitch = ns.class_("SettingSwitch", switch.Switch)
 SettingNumber = ns.class_("SettingNumber", number.Number)
+SettingKind = ns.enum("SettingKind", is_class=True)
 ControlCommandButton = ns.class_("ControlCommandButton", button.Button)
 PulseCover = ns.class_("PulseCover", cover.Cover)
 Secplus1Cover = ns.class_("Secplus1Cover", cover.Cover)
@@ -368,6 +369,9 @@ CONFIG_SCHEMA = cv.All(
                     cv.Optional("mode", default="BOX"): cv.enum({"BOX": number.NumberMode.NUMBER_MODE_BOX}, upper=True)}),
             cv.Required("warning_tone"): number.number_schema(
                 SettingNumber, entity_category="config", unit_of_measurement="Hz", icon="mdi:sine-wave").extend({
+                    cv.Optional("mode", default="BOX"): cv.enum({"BOX": number.NumberMode.NUMBER_MODE_BOX}, upper=True)}),
+            cv.Required("cooldown_time"): number.number_schema(
+                SettingNumber, entity_category="config", unit_of_measurement="s", icon="mdi:timer-lock-outline").extend({
                     cv.Optional("mode", default="BOX"): cv.enum({"BOX": number.NumberMode.NUMBER_MODE_BOX}, upper=True)}),
             cv.Required("startup_sound"): switch.switch_schema(
                 SettingSwitch, entity_category="config", icon="mdi:music-note", block_inverted=True),
@@ -724,9 +728,13 @@ async def to_code(config):
                     (("warning_sound", "esphome::opengarage::DeviceSettings::WARNING_MUTED"),
                      ("startup_sound", "esphome::opengarage::DeviceSettings::STARTUP_MUTED"))]
         cg.add(setup.set_setting_switches(*switches))
-        time = await number.new_number(conf["warning_time"], setup, False, min_value=0, max_value=30, step=1)
-        tone = await number.new_number(conf["warning_tone"], setup, True, min_value=200, max_value=5000, step=50)
-        cg.add(setup.set_setting_numbers(time, tone))
+        time = await number.new_number(conf["warning_time"], setup, SettingKind.WARNING_TIME,
+                                       min_value=0, max_value=30, step=1)
+        tone = await number.new_number(conf["warning_tone"], setup, SettingKind.WARNING_TONE,
+                                       min_value=200, max_value=5000, step=50)
+        cooldown = await number.new_number(conf["cooldown_time"], setup, SettingKind.COOLDOWN,
+                                           min_value=5, max_value=120, step=1)
+        cg.add(setup.set_setting_numbers(time, tone, cooldown))
         # Keep the original mode and threshold records first. All later generic
         # versions must retain this allocation order and fixed record size.
         cg.add(setup.load_credentials())
