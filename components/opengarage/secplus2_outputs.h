@@ -3,6 +3,7 @@
 #include "esphome/core/defines.h"
 #ifdef USE_OPENGARAGE_SECPLUS2_CONTROL
 #include "action_controller.h"
+#include "audio_policy.h"
 #include "secplus2_transport.h"
 #include "esphome/core/hal.h"
 #include <Arduino.h>
@@ -22,13 +23,13 @@ class Secplus2Outputs : public ControlOutputs {
     warning_ = true; last_burst_ = 0; bursts_ = 1;
     required_ = (minimum_ms + 999) / 1000;
     complete_at_.reset();
-    tone(13, 1000, 500);  // Same stock envelope as the pulse MVP.
+    warning_burst();  // Same stock envelope as the pulse MVP.
   }
   bool warning_tick(uint32_t elapsed) override {
     if (!buzzer_ || !warning_) return false;
     if (uint32_t(elapsed - last_burst_) < 1000) return false;
     if (bursts_ < required_) {
-      ++bursts_; last_burst_ = elapsed; tone(13, 1000, 500); return false;
+      ++bursts_; last_burst_ = elapsed; warning_burst(); return false;
     }
     if (!complete_at_) complete_at_ = elapsed;
     // Extend the completed warning briefly for a bus-idle slot, never queue a

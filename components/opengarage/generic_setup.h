@@ -2,23 +2,42 @@
 #pragma once
 #include "esphome/core/defines.h"
 #ifdef USE_OPENGARAGE_GENERIC_SETUP
+#include "audio_policy.h"
+#include "device_settings.h"
 #include "generic_credentials.h"
 #include "saved_wifi_reset.h"
 #include "opengarage_component.h"
 #include "esphome/components/api/api_server.h"
 #include "esphome/components/esphome/ota/ota_esphome.h"
+#include "esphome/components/switch/switch.h"
+#include "esphome/components/web_server/web_server.h"
 #include "esphome/components/web_server_base/web_server_base.h"
 
 namespace esphome::opengarage {
+class GenericSetup;
+// Owner sound preference. On = audible. Never optimistic: the parent persists
+// first and republishes the stored value, including after a refused write.
+class SoundSwitch : public switch_::Switch {
+ public:
+  SoundSwitch(GenericSetup *parent, uint32_t muted_flag) : parent_(parent), flag_(muted_flag) {}
+ protected:
+  void write_state(bool state) override;
+  GenericSetup *parent_;
+  uint32_t flag_;
+};
+
 class GenericSetup : public Component, public AsyncWebHandler, public ButtonRecovery {
  public:
-  GenericSetup(OpenGarageComponent *parent, api::APIServer *api, esphome::ESPHomeOTAComponent *ota)
-      : parent_(parent), api_(api), ota_(ota) {}
+  GenericSetup(OpenGarageComponent *parent, api::APIServer *api, esphome::ESPHomeOTAComponent *ota,
+               web_server::WebServer *web)
+      : parent_(parent), api_(api), ota_(ota), web_(web) {}
   void load_credentials();  // Codegen: after mode/threshold allocation, before App.setup().
   void setup() override;
   void loop() override;
   float get_setup_priority() const override { return setup_priority::BUS + 1.0f; }
   void set_status_sensor(text_sensor::TextSensor *sensor) { status_ = sensor; }
+  void set_sound_switches(SoundSwitch *warning, SoundSwitch *startup) { warning_switch_ = warning; startup_switch_ = startup; }
+  void request_sound(uint32_t muted_flag, bool audible);
   bool canHandle(AsyncWebServerRequest *request) const override;
   void handleRequest(AsyncWebServerRequest *request) override;
   // ESPAsyncWebServer otherwise discards URL-encoded POST fields before dispatch.
@@ -35,9 +54,20 @@ class GenericSetup : public Component, public AsyncWebHandler, public ButtonReco
   void send_(AsyncWebServerRequest *request, int code, const char *type, const std::string &body);
   void set_auth_();
   void fail_();
+  bool open_dashboard_route_(AsyncWebServerRequest *request) const;
+  void forward_dashboard_(AsyncWebServerRequest *request);
+  bool save_settings_(const DeviceSettings &next);
+  void publish_sounds_();
+  void handle_settings_post_(AsyncWebServerRequest *request);
   OpenGarageComponent *parent_;
   api::APIServer *api_;
   esphome::ESPHomeOTAComponent *ota_;
+  web_server::WebServer *web_;
+  SoundSwitch *warning_switch_{nullptr}, *startup_switch_{nullptr};
+  DeviceSettingsSlot settings_slot_;
+  DeviceSettings settings_{};       // Saved record; name edits apply after restart.
+  char active_name_[32]{}, active_friendly_[40]{};  // Stable App name storage for this boot.
+  bool open_dashboard_{false}, tail_checked_{false};
   text_sensor::TextSensor *status_{nullptr};
   ESPPreferenceObject preference_;
   ESPPreferenceObject setup_tune_preference_; // RTC only; never shifts the flash credential/Wi-Fi slots.

@@ -26,9 +26,17 @@ Check **Hardware Version** and **Protocol Configuration**. If you have OpenGarag
 
 ## Device Web Interface
 
-The homepage shows controls, sensors, garage configuration and diagnostics. **Open setup** leads to `/og/setup` for HA pairing details, firmware uploads and Wi-Fi administration. Both pages use the same admin authentication. A browser may cache authentication, so repeated password prompts are not guaranteed; close the browser session or use a private window when using a shared computer.
+The homepage shows controls, sensors, garage configuration and diagnostics. **Open setup** leads to `/og/setup` for HA pairing details, firmware uploads, Wi-Fi administration and [Device Settings](#device-settings). Both pages use the same admin authentication unless you open the dashboard. A browser may cache authentication, so repeated password prompts are not guaranteed; close the browser session or use a private window when using a shared computer.
 
 <img src="images/web-dashboard.jpg" alt="OpenGarage built-in web dashboard showing controls, sensors, protocol selection and vehicle distance threshold" width="800">
+
+### Device Settings
+
+`/og/setup` also has **Device Settings**:
+
+- **Hostname / Display name:** Rename OG, e.g. `garage-left`. The hostname sets the `.local` address, DHCP name and recovery AP name; the display name sets the web title and the name HA shows when adding the device. Saving restarts OG. HA normally follows the renamed device by its MAC address; if it does not reconnect, update the device's host in HA. Leave both blank to restore the defaults.
+- **Admin password:** Replace the generated password with your own (8–63 characters). It immediately applies to the web pages, firmware updates, ESPHome OTA and, from its next start, the recovery AP. The HA encryption key is unchanged. Before installing 0.10.26 or older firmware, set a password of at least 12 characters: older firmware treats shorter ones as unprovisioned and starts first-use setup.
+- **Open the controls dashboard without a password:** Lets anyone on your network use the main page without signing in. This setup page, firmware uploads, ESPHome OTA and the HA API stay protected, and door commands are accepted only from the device's own page (not from other websites). Use it only on a trusted home network.
 
 To change Wi-Fi while connected, enter the new SSID and password under **Change WiFi Settings**. Station mode uses manual entry; AP setup/recovery offers the network list. Follow the displayed `.local` address after reconnecting to the new network, or consult the router. Never expose the device's web/API/OTA ports directly to the Internet. Use securely configured HA remote access instead.
 

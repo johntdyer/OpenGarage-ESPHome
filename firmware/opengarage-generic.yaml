@@ -24,6 +24,7 @@ ota:
     password: ""  # Replaced BEFORE listener setup, never an operational empty password.
   - platform: web_server
 web_server:
+  id: generic_web
   port: 80
   version: 3
   # Balance the dashboard and link to settings; keep authenticated /update.
@@ -43,5 +44,10 @@ opengarage:
   generic_setup:
     api_id: generic_api
     ota_id: generic_ota
+    web_server_id: generic_web
     status:
       name: Device Setup
+    warning_sound:
+      name: Door Warning Sound
+    startup_sound:
+      name: Startup Sounds

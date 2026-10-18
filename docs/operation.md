@@ -24,6 +24,7 @@ If a Security+ 2.0 opener stops responding, OG retries status queries automatica
 - **Garage Door Open/Close** requests a direction using the reported door state. Requesting Open when already Open, or Close when already Closed, does nothing. Directional requests require a known Open/Closed state; Security+ 2.0 also permits either direction from a confirmed Stopped state. They are not accepted while state is Unknown or the door is moving. A **30-second cooldown** starts when a door command is sent and normally blocks further Open/Close requests.
 - **Request Door Toggle** behaves like an opener button and can be requested even when door state is unknown, subject to the other hardware, setup, transport and network guards. It bypasses the 30-second directional-command cooldown.
 - Door requests normally sound a five-second buzzer warning. A Toggle during fresh, confirmed Security+ Opening/Closing skips the warning. Dry-contact Toggle always warns. A warning already underway is not shortened when motion is subsequently detected.
+- **Door Warning Sound** (Configuration) silences the warning buzzer. The five-second countdown, Control Phase and **Cancel Pending Action** still apply; only the sound is removed. Keep it on whenever someone may be near the door or you cannot see it close.
 - **Cancel Pending Action** cancels before a command is dispatched. It cannot undo a sent command or stop door movement.
 
 Toggle may stop, reverse or start the door depending on the opener and its current state. It is **not a dedicated or emergency Stop**. There is no percentage-position control. Toggle and Security+ 2.0 Open/Close from confirmed Stopped bypass the cooldown; commands from Stopped still sound the warning. Pending actions and short repeat-command guards can still prevent another request.
@@ -60,3 +61,5 @@ The HA Garage Door cover can show an unverified Open placeholder before real sta
 ## Startup Sounds
 
 Startup tunes distinguish AP availability from a connected station. Successful first-use AP-to-station setup has its own short melody. Door warnings take priority over diagnostic/startup audio.
+
+Turn off **Startup Sounds** (Configuration) to skip these tunes after setup. Recovery-threshold beeps and the audible IP report always sound because you request them with the button. Sound settings are saved on OG, kept by Wi-Fi reset and OTA, and cleared by factory reset.

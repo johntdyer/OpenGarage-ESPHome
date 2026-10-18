@@ -125,7 +125,9 @@ class OpenGarageComponent : public Component
     return !startup_audio_shutdown_ && !unified_ota_latched_ && !update_gate_.open() && !action_controller_.pending() &&
         (!configuration_stopped_ || setup_inhibited_);
   }
-  void startup_tune(StartupTune tune) { if (startup_audio_allowed()) pulse_outputs_.startup_tune(millis(),tune); }
+  void startup_tune(StartupTune tune) {
+    if (startup_audio_allowed() && !AudioPolicy::startup_muted) pulse_outputs_.startup_tune(millis(),tune);
+  }
   void service_startup_audio(bool allowed) { pulse_outputs_.service_startup(millis(),allowed && startup_audio_allowed()); }
   bool report_ip(const char *ip) {
     if (configuration_stopped_ || setup_inhibited_ || action_controller_.stopped() || action_controller_.pending()) return false;
