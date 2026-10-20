@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "action_controller.h"
+#include "audio_policy.h"
 #include "esphome/core/gpio.h"
 #include <Arduino.h>
 #include <Ticker.h>
@@ -27,16 +28,18 @@ class PulseOutputs : public ControlOutputs {
     last_burst_ = 0;
     bursts_ = 1;
     required_bursts_ = (minimum_ms + 999) / 1000;
-    tone(13, 1000, 500);  // Independent finite-duration 1 kHz burst, stock envelope.
+    if (required_bursts_ == 0) { bursts_ = 0; return; }  // Owner skipped the countdown.
+    warning_burst();  // Independent finite-duration 1 kHz burst, stock envelope.
   }
   bool warning_tick(uint32_t elapsed) override {
+    if (ready_ && warning_ && required_bursts_ == 0) return true;
     if (!ready_ || !warning_ || uint32_t(elapsed - last_burst_) < 1000) return false;
     if (bursts_ >= required_bursts_) return true;
     ++bursts_;
     last_burst_ = elapsed;
     // Late scheduling EXTENDS the countdown; never catch up with shortened beeps.
     // Finite tone ends independently after 500 ms, followed by at least 500 ms OFF.
-    tone(13, 1000, 500);
+    warning_burst();
     return false;
   }
   void warning_stop() override {

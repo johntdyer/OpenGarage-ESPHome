@@ -9,6 +9,8 @@
 #include "esphome/components/wifi/wifi_component.h"
 #include "generic_setup_page.h"
 #include <cstdio>
+#include <cmath>
+#include <cstring>
 
 namespace esphome::opengarage {
 namespace {
@@ -23,7 +25,17 @@ std::string form_value(AsyncWebServerRequest *request, const char *key) {
   // POST body only: credentials must not be accepted from query strings.
   return request->hasParam(key, true) ? request->getParam(key, true)->value().c_str() : "";
 }
+bool same_secret(const std::string &a, const char *b) {
+  // Length-independent scan of the fixed-size stored field.
+  const size_t n = std::strlen(b);
+  uint8_t diff = a.size() != n;
+  for (size_t i = 0; i < 64; ++i) diff |= uint8_t(i < a.size() ? a[i] : 0) ^ uint8_t(i < n ? b[i] : 0);
+  return diff == 0;
 }
+}
+
+void SettingSwitch::write_state(bool state) { parent_->request_setting(flag_, state); }
+void SettingNumber::control(float value) { parent_->request_number(kind_, value); }
 
 void GenericSetup::load_credentials() {
   if (global_preferences != nullptr) {
@@ -35,6 +47,15 @@ void GenericSetup::load_credentials() {
     if (setup_tune_preference_.load(&marker) && marker==SETUP_TUNE_MARKER)
       setup_tune_pending_ = setup_tune_preference_.save(&clear); // Consume once across the setup's soft reboot.
   }
+  if (configured_ && global_preferences != nullptr && settings_slot_.load(&settings_)) {
+    // Owner settings apply only to a provisioned device; first-use setup keeps
+    // the documented opengarage-xxxxxx AP name. Names take effect at boot only.
+    apply_policy_();
+    open_dashboard_ = settings_.flag(DeviceSettings::OPEN_DASHBOARD);
+    std::memcpy(active_name_, settings_.hostname, sizeof(active_name_));
+    std::memcpy(active_friendly_, settings_.friendly, sizeof(active_friendly_));
+    AppIdentity::set(active_name_[0] ? active_name_ : nullptr, active_friendly_[0] ? active_friendly_ : nullptr);
+  } else settings_ = {};
   if (configured_) {
     parent_->set_unified_client(credentials_.client_id);
     wifi_recovery_ = !wifi_reset_.has_saved_network();
@@ -90,12 +111,18 @@ void GenericSetup::setup() {
     ap.set_password(credentials_.admin);
     wifi::global_wifi_component->set_ap(ap);
   }
+  publish_switches_();
   if (status_) status_->publish_state(configured_ ? (wifi_recovery_ ?
       "Wi-Fi recovery AP; sign in as admin and configure Wi-Fi; outputs inhibited" : "Configured; admin setup page: /og/setup") :
       "Setup required; open setup AP within 10 minutes; outputs inhibited");
 }
 
 void GenericSetup::loop() {
+  if (!tail_checked_) {
+    tail_checked_ = true;  // All component setup, and so all slot allocation, is complete.
+    if (!settings_slot_.clear_of_allocations())
+      ESP_LOGE("og.setup", "Preference allocation reaches the owner-settings slot; settings changes refused");
+  }
   if (!configured_ && !expired_ && uint32_t(millis() - started_ms_) >= WINDOW_MS) {
     expired_ = true;
     // Stop the open AP, not merely its HTML form. No automatic reboot reopens it.
@@ -170,7 +197,139 @@ bool GenericSetup::canHandle(AsyncWebServerRequest *request) const {
   // No stock captive-portal GET /wifisave bypass, even during later AP recovery.
   // While unconfigured, consume EVERYTHING (including /update upload bodies).
   return recovery_inhibited_ || failed_ || !configured_ || url.startsWith("/og/") || url == "/wifisave" || url == "/config.json" ||
-      (wifi::global_wifi_component->is_ap_active() && request->method() == HTTP_GET);
+      (wifi::global_wifi_component->is_ap_active() && request->method() == HTTP_GET) || open_dashboard_route_(request);
+}
+
+bool GenericSetup::open_dashboard_route_(AsyncWebServerRequest *request) const {
+  // Only the upstream dashboard/REST/events handler. /update (web OTA), /og/*,
+  // native OTA and the API keep their own authentication in every mode.
+  return open_dashboard_ && configured_ && !failed_ && !recovery_inhibited_ && web_ != nullptr &&
+      !wifi::global_wifi_component->is_ap_active() && !request->url().startsWith("/og/") &&
+      request->url() != "/update" && web_->canHandle(request);
+}
+
+void GenericSetup::forward_dashboard_(AsyncWebServerRequest *request) {
+  if (!trusted_host_(request)) { send_(request, 403, "text/plain", "Use the device IP or its .local hostname."); return; }
+  const auto method = request->method();
+  // Without a password prompt, a visited website could otherwise POST a door
+  // command. Browsers always send Origin on POST; require this page's own.
+  if (method != HTTP_GET && method != HTTP_HEAD && method != HTTP_OPTIONS &&
+      (!request->hasHeader("Origin") || request->getHeader("Origin")->value() != "http://" + request->host())) {
+    send_(request, 403, "text/plain", "Use the device's own web page for controls.");
+    return;
+  }
+  web_->handleRequest(request);  // Bypasses only the upstream auth middleware wrapper.
+}
+
+void GenericSetup::apply_policy_() {
+  AudioPolicy::warning_muted = settings_.flag(DeviceSettings::WARNING_MUTED);
+  AudioPolicy::warning_ms = settings_.warning_s() < 0 ? -1 : settings_.warning_s() * 1000;
+  AudioPolicy::warning_hz = settings_.tone_hz() ? settings_.tone_hz() : 1000;
+  AudioPolicy::lockout_ms = settings_.cooldown_s() ? int32_t(settings_.cooldown_s() * 1000) : -1;
+  AudioPolicy::startup_muted = settings_.flag(DeviceSettings::STARTUP_MUTED);
+}
+
+void GenericSetup::publish_switches_() {
+  if (warning_switch_) warning_switch_->publish_state(!settings_.flag(DeviceSettings::WARNING_MUTED));
+  if (startup_switch_) startup_switch_->publish_state(!settings_.flag(DeviceSettings::STARTUP_MUTED));
+  if (time_number_) time_number_->publish_state(AudioPolicy::effective_warning_ms() / 1000);
+  if (tone_number_) tone_number_->publish_state(AudioPolicy::warning_hz);
+  if (cooldown_number_) cooldown_number_->publish_state(
+      (AudioPolicy::lockout_ms < 0 ? AudioPolicy::default_lockout_ms : uint32_t(AudioPolicy::lockout_ms)) / 1000);
+}
+
+bool GenericSetup::save_settings_(const DeviceSettings &next) {
+  if (settings_slot_.save(next)) { settings_ = next; return true; }
+  // Never let a later unrelated sync commit a change reported as failed.
+  settings_slot_.stage(settings_);
+  ESP_LOGW("og.setup", "Owner settings save failed; retaining current settings");
+  return false;
+}
+
+void GenericSetup::request_number(SettingKind kind, float value) {
+  bool ok = std::isfinite(value) && std::floor(value) == value;
+  const auto v = ok ? uint32_t(value) : 0U;
+  switch (kind) {
+    case SettingKind::WARNING_TIME: ok = ok && value >= 0 && v <= DeviceSettings::MAX_WARNING_S; break;
+    case SettingKind::WARNING_TONE:
+      ok = ok && v >= DeviceSettings::MIN_TONE_HZ && v <= DeviceSettings::MAX_TONE_HZ && v % DeviceSettings::TONE_STEP_HZ == 0;
+      break;
+    case SettingKind::COOLDOWN: ok = ok && v >= DeviceSettings::MIN_COOLDOWN_S && v <= DeviceSettings::MAX_COOLDOWN_S; break;
+  }
+  if (ok && configured_ && !failed_ && !recovery_inhibited_ && !recovery_committed_ && parent_->button_recovery_allowed()) {
+    auto next = settings_;
+    // A value equal to the default stores "default", so later YAML changes still apply.
+    if (kind == SettingKind::WARNING_TONE) next.set_tone_hz(v == 1000 ? 0 : v);
+    else if (kind == SettingKind::COOLDOWN) next.set_cooldown_s(v * 1000 == AudioPolicy::default_lockout_ms ? 0 : v);
+    else next.set_warning_s(v * 1000 == AudioPolicy::default_warning_ms ? -1 : int32_t(v));
+    if (next.flags != settings_.flags && save_settings_(next)) apply_policy_();
+  }
+  publish_switches_();
+}
+
+void GenericSetup::request_setting(uint32_t off_flag, bool on) {
+  // A change applies to the next request; a warning already underway keeps its timing.
+  if (configured_ && !failed_ && !recovery_inhibited_ && !recovery_committed_ && parent_->button_recovery_allowed()) {
+    auto next = settings_;
+    next.set_flag(off_flag, !on);
+    if (next.flags != settings_.flags && save_settings_(next)) apply_policy_();
+  }
+  publish_switches_();
+}
+
+void GenericSetup::handle_settings_post_(AsyncWebServerRequest *request) {
+  const auto &url = request->url();
+  if (!parent_->button_recovery_allowed()) { send_(request, 409, "text/plain", "Wait for the firmware upload to finish."); return; }
+  if (url == "/og/password") {
+    const std::string current = form_value(request, "current_password"), next = form_value(request, "new_password");
+    if (!same_secret(current, credentials_.admin)) { send_(request, 403, "text/plain", "Current password is incorrect."); return; }
+    if (!GenericCredentials::password_valid(next)) {
+      send_(request, 400, "text/plain", "New password must be 8-63 printable ASCII characters."); return;
+    }
+    GenericCredentials pending = credentials_;
+    std::memset(pending.admin, 0, sizeof(pending.admin));  // No old-password tail in flash.
+    std::memcpy(pending.admin, next.c_str(), next.size());
+    if (!pending.valid() || !preference_.save(&pending) || !global_preferences->sync()) {
+      preference_.save(&credentials_);  // Roll back the RAM cache; never claim an uncertain change.
+      send_(request, 503, "text/plain", "Password save failed; the current password still applies."); return;
+    }
+    credentials_ = pending;
+    auth_password_ = credentials_.admin;
+    set_auth_();  // Web, setup page and native OTA, effective immediately.
+    auto ap = wifi::global_wifi_component->get_ap();
+    ap.set_password(credentials_.admin);  // Recovery AP, from its next start.
+    wifi::global_wifi_component->set_ap(ap);
+    ESP_LOGI("og.setup", "Admin password changed");
+    send_(request, 200, "text/plain", "Password changed. Sign in again as admin with the new password; update your saved private details.");
+    return;
+  }
+  DeviceSettings next = settings_;
+  if (url == "/og/access") {
+    next.set_flag(DeviceSettings::OPEN_DASHBOARD, form_value(request, "open_dashboard") == "1");
+    if (!save_settings_(next)) { send_(request, 503, "text/plain", "Save failed; dashboard access unchanged."); return; }
+    open_dashboard_ = settings_.flag(DeviceSettings::OPEN_DASHBOARD);
+    send_(request, 200, "text/plain", open_dashboard_ ?
+        "Dashboard opened: anyone on your network can now use the controls page without a password. Setup and firmware updates still require it." :
+        "Dashboard password required again.");
+    return;
+  }
+  // /og/name
+  const std::string hostname = form_value(request, "hostname"), friendly = form_value(request, "friendly_name");
+  if (!hostname.empty() && !DeviceSettings::hostname_valid(hostname.c_str(), hostname.size())) {
+    send_(request, 400, "text/plain", "Hostname must be 1-31 lowercase letters, digits or hyphens, not starting or ending with a hyphen."); return;
+  }
+  if (!DeviceSettings::friendly_valid(friendly.c_str(), friendly.size())) {
+    send_(request, 400, "text/plain", "Display name must be at most 39 printable characters, without \" \\ < > or &."); return;
+  }
+  std::memset(next.hostname, 0, sizeof(next.hostname));
+  std::memset(next.friendly, 0, sizeof(next.friendly));
+  std::memcpy(next.hostname, hostname.c_str(), hostname.size());
+  std::memcpy(next.friendly, friendly.c_str(), friendly.size());
+  if (!save_settings_(next)) { send_(request, 503, "text/plain", "Save failed; name unchanged."); return; }
+  const std::string address = hostname.empty() ? "the default opengarage-xxxxxx.local address" : "http://" + hostname + ".local/";
+  if (status_) status_->publish_state("Device name saved; restarting");
+  send_(request, 200, "text/plain", "Name saved; restarting. Reconnect at " + address + ". Home Assistant normally follows the device by its MAC address.");
+  set_timeout("setup-restart", 3000, []() { App.safe_reboot(); });
 }
 
 bool GenericSetup::trusted_host_(AsyncWebServerRequest *request) const {
@@ -219,6 +378,7 @@ void GenericSetup::send_(AsyncWebServerRequest *request, int code, const char *t
 void GenericSetup::handleRequest(AsyncWebServerRequest *request) {
   if (recovery_inhibited_) { send_(request, 503, "text/plain", "Physical reset in progress or failed; controls inhibited. Restart or retry the physical reset."); return; }
   if (failed_) { send_(request, 503, "text/plain", "Setup initialization failed; serial recovery required."); return; }
+  if (open_dashboard_route_(request)) { forward_dashboard_(request); return; }
   if (!authorize_(request)) return;
   const auto &url = request->url();
   if (url == "/wifisave") { send_(request, 405, "text/plain", "Use the authenticated setup form."); return; }
@@ -233,7 +393,11 @@ void GenericSetup::handleRequest(AsyncWebServerRequest *request) {
           ",\"dashboard_available\":" + (configured_ && !wifi::global_wifi_component->is_ap_active() ? "true" : "false") +
           ",\"hostname\":\"" + App.get_name().c_str() + ".local\"" +
           ",\"mac_suffix\":\"" + mac_suffix + "\"" +
-          ",\"token\":\"" + token_ + "\",\"key\":\"" + key + "\",\"client_id\":\"" + (configured_ ? id : "") + "\"}");
+          ",\"token\":\"" + token_ + "\",\"key\":\"" + key + "\",\"client_id\":\"" + (configured_ ? id : "") + "\"" +
+          // Validated charsets: no JSON escaping needed. Saved names apply after restart.
+          ",\"saved_hostname\":\"" + (configured_ ? settings_.hostname : "") + "\"" +
+          ",\"saved_friendly_name\":\"" + (configured_ ? settings_.friendly : "") + "\"" +
+          ",\"open_dashboard\":" + (configured_ && open_dashboard_ ? "true" : "false") + "}");
     } else if (url == "/config.json") {
       captive_portal::global_captive_portal->handle_config(request);  // Standard scan results/escaping.
     } else {
@@ -252,6 +416,9 @@ void GenericSetup::handleRequest(AsyncWebServerRequest *request) {
     parent_->enter_update_mode();
     send_(request, 200, "text/plain", "Firmware update mode entered. Upload a matching application .bin below, or restart the device to resume controls.");
     return;
+  }
+  if (configured_ && (url == "/og/password" || url == "/og/name" || url == "/og/access")) {
+    handle_settings_post_(request); return;
   }
   const bool preview = url == "/og/prepare";
   if (!preview && url != "/og/setup" && url != "/og/wifi") { send_(request, 404, "text/plain", "Not found"); return; }

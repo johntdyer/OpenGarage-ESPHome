@@ -125,7 +125,9 @@ class OpenGarageComponent : public Component
     return !startup_audio_shutdown_ && !unified_ota_latched_ && !update_gate_.open() && !action_controller_.pending() &&
         (!configuration_stopped_ || setup_inhibited_);
   }
-  void startup_tune(StartupTune tune) { if (startup_audio_allowed()) pulse_outputs_.startup_tune(millis(),tune); }
+  void startup_tune(StartupTune tune) {
+    if (startup_audio_allowed() && !AudioPolicy::startup_muted) pulse_outputs_.startup_tune(millis(),tune);
+  }
   void service_startup_audio(bool allowed) { pulse_outputs_.service_startup(millis(),allowed && startup_audio_allowed()); }
   bool report_ip(const char *ip) {
     if (configuration_stopped_ || setup_inhibited_ || action_controller_.stopped() || action_controller_.pending()) return false;
@@ -183,6 +185,8 @@ class OpenGarageComponent : public Component
   void set_control_pins(InternalGPIOPin *door, InternalGPIOPin *buzzer) { door_pin_ = door; buzzer_pin_ = buzzer; }
   void set_control_timing(uint32_t warning, uint32_t pulse, uint32_t lockout) {
     control_config_.warning_ms = warning; control_config_.pulse_ms = pulse; control_config_.lockout_ms = lockout;
+    AudioPolicy::default_warning_ms = warning;
+    AudioPolicy::default_lockout_ms = lockout;
   }
   void set_bench_mode(bool value) { control_config_.bench_mode = value; }
   void set_button_recovery(ButtonRecovery *value) { control_button_.set_recovery(value); }

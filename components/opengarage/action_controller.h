@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
+#include "audio_policy.h"
 #include "state_resolver.h"
 #include <cstdint>
 
@@ -111,7 +112,9 @@ class ActionController {
     last_service_ = now;
     inputs_seen_ = true;
     if (dispatch_seen_ && uint32_t(now - dispatched_at_) >= REPEAT_GUARD_MS) dispatch_seen_ = false;
-    if (cooldown_ && uint32_t(now - dispatched_at_) >= config_.lockout_ms) cooldown_ = false;
+    // An owner cooldown (5-120 s, the same range configure() accepts) applies at once.
+    const uint32_t lockout = AudioPolicy::lockout_ms < 0 ? config_.lockout_ms : uint32_t(AudioPolicy::lockout_ms);
+    if (cooldown_ && uint32_t(now - dispatched_at_) >= lockout) cooldown_ = false;
     if (stopped_) return;
     if (!config_.bench_mode && config_valid_ && !manually_disabled_ && !armed_ &&
         hardware_ok_) {
@@ -136,7 +139,7 @@ class ActionController {
       }
       const auto elapsed = uint32_t(now - warning_at_);
       const bool warning_complete = outputs_.warning_tick(elapsed);
-      if (elapsed < config_.warning_ms || !warning_complete) return;
+      if (elapsed < active_warning_ms_ || !warning_complete) return;
       outputs_.warning_stop();
       dispatch_(now);
     } else if (phase_ == ActionPhase::PULSING) {
@@ -239,7 +242,10 @@ class ActionController {
     warning_at_ = now;
     phase_ = ActionPhase::WARNING;
     reason_ = ActionReason::WARNING;
-    outputs_.warning_start(config_.warning_ms);
+    // Owner time (0-30 s) or YAML default. Zero keeps the WARNING phase and its
+    // state/link checks, but with no delay or sound.
+    active_warning_ms_ = AudioPolicy::warning_ms < 0 ? config_.warning_ms : AudioPolicy::effective_warning_ms();
+    outputs_.warning_start(active_warning_ms_);
     return true;
   }
   bool endpoint_() const { return state_ == DoorState::CLOSED || state_ == DoorState::OPEN; }
@@ -274,6 +280,7 @@ class ActionController {
   CommandSource action_source_{CommandSource::NETWORK};
   DoorCommand action_command_{DoorCommand::TOGGLE};
   ActionReason reason_{ActionReason::DISARMED};
+  uint32_t active_warning_ms_{5000};
   uint32_t last_service_{0}, warning_at_{0}, dispatched_at_{0}, armed_at_{0}, dispatches_{0};
   bool armed_{false}, cooldown_{false}, inputs_seen_{false}, hardware_ok_{false}, link_ok_{false};
   bool config_valid_{true}, stopped_{false}, manually_disabled_{false};

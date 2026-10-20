@@ -13,6 +13,7 @@ code{overflow-wrap:anywhere}#message{white-space:pre-wrap}small{display:block;co
 [hidden]{display:none!important}textarea{font:14px monospace;min-height:13rem}h2{font-size:1.25rem;margin:0 0 .75rem}
 .setup-section{margin:1.75rem 0}.setup-section:not([hidden])~.setup-section:not([hidden]){border-top:1px solid #b6c5cf;padding-top:1.75rem}
 progress{width:100%;height:1.2rem}
+.check{display:flex;gap:.6rem;align-items:center}.check input{width:auto}
 </style>
 <h1>OpenGarage Setup &amp; Update</h1>
 <p id="loading">Loading device setup…</p>
@@ -31,6 +32,19 @@ progress{width:100%;height:1.2rem}
 <button id="save">Save and connect</button>
 <p id="setup_note"><small>Setup stays open for 10 minutes.</small></p>
 </form>
+<section id="device_settings" class="setup-section" hidden><h2>Device Settings</h2>
+<form id="name_form" autocomplete="off"><label>Hostname<input id="hostname" name="hostname" maxlength="31" pattern="[a-z0-9]([a-z0-9\-]*[a-z0-9])?" placeholder="Default: opengarage-xxxxxx" spellcheck="false"></label>
+<label>Display name<input id="friendly_name" name="friendly_name" maxlength="39" placeholder="Default"></label>
+<small>Leave blank for the default. Saving restarts OpenGarage, which then answers at the new <code>.local</code> address and uses the hostname as its recovery AP name.</small>
+<button id="save_name">Save name and restart</button></form>
+<form id="password_form" autocomplete="off"><label>Current admin password<input name="current_password" type="password" required autocomplete="current-password"></label>
+<label>New admin password<input id="new_password" name="new_password" type="password" minlength="8" maxlength="63" required autocomplete="new-password"></label>
+<label>Confirm new password<input id="confirm_password" type="password" minlength="8" maxlength="63" required autocomplete="new-password"></label>
+<small>8-63 characters. Also used for this page, firmware updates, ESPHome OTA and the recovery AP. The HA encryption key does not change.</small>
+<button id="save_password">Change password</button></form>
+<label class="check"><input id="open_dashboard" type="checkbox"> Open the controls dashboard without a password</label>
+<small>Anyone on your network could then operate the door from the device's main page. This setup page, firmware updates and Home Assistant stay protected.</small>
+</section>
 <section id="receipt" class="setup-section" hidden><h2>Save your device credentials</h2>
 <p>Save these before continuing — your phone may drop this page when Wi-Fi switches over.</p>
 <label>Private recovery details<textarea id="credentials" readonly spellcheck="false"></textarea></label>
@@ -75,6 +89,8 @@ async function post(path,body){return fetch(path,{method:'POST',headers:{'X-OG-C
   }
   el('loading').hidden=true;form.hidden=false;el('setup_note').hidden=info.configured;el('paired').hidden=!info.configured;el('firmware_settings').hidden=!info.configured;
   el('dashboard_link').hidden=info.dashboard_available!==true;
+  el('device_settings').hidden=!info.configured;el('open_dashboard').checked=info.open_dashboard===true;
+  el('hostname').value=info.saved_hostname||'';el('friendly_name').value=info.saved_friendly_name||'';
   el('key').value=info.key;el('saved_id').textContent=info.client_id;el('save').textContent=info.configured?'Save Wi-Fi and restart':'Save and connect';
   // Initial setup is AP-only. Once configured, dashboard_available is false
   // precisely while the AP is active. Missing metadata defaults to manual.
@@ -102,6 +118,30 @@ el('connect').addEventListener('click',async()=>{
   el('connect').disabled=true;el('back').disabled=true;
   try{const r=await post('/og/setup',pendingBody);message.textContent=await r.text();if(r.ok){showReconnect();el('receipt_note').textContent='Saved to the device. Keep these details private and rejoin your home Wi-Fi.';}else{el('connect').disabled=false;el('back').disabled=false;}}
   catch(e){showReconnect();message.textContent='Connection changed. Rejoin your Wi-Fi and check the device. Keep these credentials; do not repeat initial setup blindly.';}
+});
+async function settingsPost(path,body,button){
+  button.disabled=true;message.textContent='';
+  try{const r=await post(path,body);message.textContent=await r.text();return r.ok;}
+  catch(e){message.textContent='Connection lost. Check the device before retrying.';return false;}
+  finally{button.disabled=false;}
+}
+el('name_form').addEventListener('submit',async e=>{
+  e.preventDefault();if(!info?.configured)return;
+  const host=el('hostname').value.trim().toLowerCase();el('hostname').value=host;
+  if(!confirm('Save the name and restart OpenGarage?'))return;
+  if(await settingsPost('/og/name',new FormData(el('name_form')),el('save_name'))&&host){
+    el('local_address').setAttribute('href','http://'+host+'.local/');el('local_address').textContent='http://'+host+'.local/';showReconnect();
+  }
+});
+el('password_form').addEventListener('submit',async e=>{
+  e.preventDefault();if(!info?.configured)return;
+  if(el('new_password').value!==el('confirm_password').value){message.textContent='New passwords do not match.';return;}
+  if(await settingsPost('/og/password',new FormData(el('password_form')),el('save_password')))el('password_form').reset();
+});
+el('open_dashboard').addEventListener('change',async()=>{
+  const box=el('open_dashboard'),open=box.checked;
+  if(open&&!confirm('Allow anyone on your network to operate the door from the dashboard without a password?')){box.checked=false;return;}
+  if(!await settingsPost('/og/access',{open_dashboard:open?'1':'0'},box))box.checked=!open;
 });
 el('back').addEventListener('click',()=>{el('receipt').hidden=true;form.hidden=false;message.textContent='';});
 el('download').addEventListener('click',()=>{const url=URL.createObjectURL(new Blob([el('credentials').value+'\n'],{type:'text/plain'}));const a=document.createElement('a');a.href=url;const suffix=typeof info?.mac_suffix==='string'&&/^[a-f0-9]{4}$/i.test(info.mac_suffix)?'-'+info.mac_suffix.toLowerCase():'';a.download='opengarage-private-details'+suffix+'.txt';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});

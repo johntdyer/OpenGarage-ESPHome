@@ -34,13 +34,13 @@ Hold the button for about 1â€“3 seconds, release, and count groups of notes: 1â€
 
 ### Change Wi-Fi Settings
 
-While OG is connected, open `http://DEVICE-IP/og/setup` and use **Change WiFi Settings**. If OG can no longer connect to Wi-Fi, use the button's Wi-Fi reset gesture. Then join the recovery AP using your existing admin/recovery password. Open **http://192.168.4.1/** and log in as **admin** with the same password. Save new Wi-Fi details and restart. Admin password, HA key, client identity, protocol and thresholds are retained. Controls stay inhibited during this explicit recovery boot.
+While OG is connected, open `http://DEVICE-IP/og/setup` and use **Change WiFi Settings**. If OG can no longer connect to Wi-Fi, use the button's Wi-Fi reset gesture. Then join the recovery AP using your existing admin/recovery password. Open **http://192.168.4.1/** and log in as **admin** with the same password. Save new Wi-Fi details and restart. Admin password, HA key, client identity, protocol, thresholds, device name and sound/dashboard settings are retained. If you renamed OG, the recovery AP uses your hostname. Controls stay inhibited during this explicit recovery boot.
 
 If you have lost the recovery password or want to clear the saved ESPHome settings, use factory reset.
 
 ### Factory Reset / Forgotten Password
 
-Factory reset clears ESPHome preferences and returns to first-use setup. Save the new credentials, update HA pairing, select the protocol and restore calibration. Security+ 2.0 gets a fresh client ID; ordinary reboot, OTA and Wi-Fi-only reset preserve it.
+Factory reset clears ESPHome preferences and returns to first-use setup, including any custom name, password, sound and dashboard settings. Save the new credentials, update HA pairing, select the protocol and restore calibration. Security+ 2.0 gets a fresh client ID; ordinary reboot, OTA and Wi-Fi-only reset preserve it.
 
 Factory reset does not replace firmware or perform an all-flash secure wipe. Historical stock regions are not explicitly erased. Physical reset requires a running application and is blocked during active firmware upload.
 

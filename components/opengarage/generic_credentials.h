@@ -22,8 +22,11 @@ struct GenericCredentials {
   std::array<uint8_t, 32> api_key{};
   char admin[64]{};
 
+  // Generated passwords are 32 hex characters. Owner-chosen ones may be as short
+  // as WPA2's 8-character minimum, since this also protects the recovery AP.
+  // Firmware 0.10.26 and earlier rejected anything under 12 as unprovisioned.
   static bool password_valid(const std::string &password) {
-    if (password.size() < 12 || password.size() > 63) return false;
+    if (password.size() < 8 || password.size() > 63) return false;
     for (unsigned char c : password) if (c < 32 || c > 126) return false;
     return true;
   }

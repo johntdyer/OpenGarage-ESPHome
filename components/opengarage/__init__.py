@@ -4,7 +4,8 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 import esphome.final_validate as fv
 from esphome import pins
-from esphome.components import binary_sensor, sensor, text_sensor, button, cover, light, lock, ota, select, number, api
+from esphome.components import binary_sensor, sensor, text_sensor, button, cover, light, lock, ota, select, number, api, web_server
+from esphome.components import switch
 from esphome.components.esphome.ota import ESPHomeOTAComponent
 from esphome.components.esp8266.const import require_waveform
 from esphome.const import CONF_ID, __version__ as ESPHOME_VERSION
@@ -23,6 +24,8 @@ def AUTO_LOAD(config):
         components.append("select")
     if "threshold_controls" in config:
         components.append("number")
+    if "generic_setup" in config:
+        components += ["switch", "number"]
     return components
 DEPENDENCIES = ["esp8266"]
 MULTI_CONF = False
@@ -31,6 +34,9 @@ MAX_THRESHOLD_CM = 450  # Keep in sync with ThresholdSettings::MAX_CM.
 ns = cg.esphome_ns.namespace("opengarage")
 OpenGarageComponent = ns.class_("OpenGarageComponent", cg.Component)
 GenericSetup = ns.class_("GenericSetup", cg.Component)
+SettingSwitch = ns.class_("SettingSwitch", switch.Switch)
+SettingNumber = ns.class_("SettingNumber", number.Number)
+SettingKind = ns.enum("SettingKind", is_class=True)
 ControlCommandButton = ns.class_("ControlCommandButton", button.Button)
 PulseCover = ns.class_("PulseCover", cover.Cover)
 Secplus1Cover = ns.class_("Secplus1Cover", cover.Cover)
@@ -353,7 +359,22 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(): cv.declare_id(GenericSetup),
             cv.Required("api_id"): cv.use_id(api.APIServer),
             cv.Required("ota_id"): cv.use_id(ESPHomeOTAComponent),
+            cv.Required("web_server_id"): cv.use_id(web_server.WebServer),
             cv.Required("status"): text_sensor.text_sensor_schema(entity_category="diagnostic"),
+            # Plain owner settings stored in the tail slot; never upstream switch restore.
+            cv.Required("warning_sound"): switch.switch_schema(
+                SettingSwitch, entity_category="config", icon="mdi:bullhorn", block_inverted=True),
+            cv.Required("warning_time"): number.number_schema(
+                SettingNumber, entity_category="config", unit_of_measurement="s", icon="mdi:timer-sand").extend({
+                    cv.Optional("mode", default="BOX"): cv.enum({"BOX": number.NumberMode.NUMBER_MODE_BOX}, upper=True)}),
+            cv.Required("warning_tone"): number.number_schema(
+                SettingNumber, entity_category="config", unit_of_measurement="Hz", icon="mdi:sine-wave").extend({
+                    cv.Optional("mode", default="BOX"): cv.enum({"BOX": number.NumberMode.NUMBER_MODE_BOX}, upper=True)}),
+            cv.Required("cooldown_time"): number.number_schema(
+                SettingNumber, entity_category="config", unit_of_measurement="s", icon="mdi:timer-lock-outline").extend({
+                    cv.Optional("mode", default="BOX"): cv.enum({"BOX": number.NumberMode.NUMBER_MODE_BOX}, upper=True)}),
+            cv.Required("startup_sound"): switch.switch_schema(
+                SettingSwitch, entity_category="config", icon="mdi:music-note", block_inverted=True),
         }),
         cv.Optional("state_source", default="distance"): cv.enum(SOURCES, lower=True),
         cv.Optional("mounting", default="ceiling"): cv.enum(MOUNTINGS, lower=True),
@@ -400,6 +421,8 @@ def _final_validate(config):
         if config["generic_setup"]["api_id"] != full["api"]["id"] or config["generic_setup"]["ota_id"] != next(
                 item["id"] for item in full["ota"] if item["platform"] == "esphome"):
             raise cv.Invalid("Generic setup must own the configured API and OTA listeners")
+        if config["generic_setup"]["web_server_id"] != full["web_server"]["id"]:
+            raise cv.Invalid("Generic setup must own the configured web_server")
     if "dev_secplus1" in config and not full.get("ota"):
         raise cv.Invalid("Security+ 1.0 status profile requires OTA lifecycle support")
     if "dev_secplus2_sync" in config:
@@ -697,9 +720,21 @@ async def to_code(config):
         cg.add_define("USE_API_NOISE_PSK_FROM_YAML")
         setup = cg.new_Pvariable(conf[CONF_ID], var,
                                 await cg.get_variable(conf["api_id"]),
-                                await cg.get_variable(conf["ota_id"]))
+                                await cg.get_variable(conf["ota_id"]),
+                                await cg.get_variable(conf["web_server_id"]))
         await cg.register_component(setup, conf)
         cg.add(setup.set_status_sensor(await text_sensor.new_text_sensor(conf["status"])))
+        switches = [await switch.new_switch(conf[key], setup, cg.RawExpression(flag)) for key, flag in
+                    (("warning_sound", "esphome::opengarage::DeviceSettings::WARNING_MUTED"),
+                     ("startup_sound", "esphome::opengarage::DeviceSettings::STARTUP_MUTED"))]
+        cg.add(setup.set_setting_switches(*switches))
+        time = await number.new_number(conf["warning_time"], setup, SettingKind.WARNING_TIME,
+                                       min_value=0, max_value=30, step=1)
+        tone = await number.new_number(conf["warning_tone"], setup, SettingKind.WARNING_TONE,
+                                       min_value=200, max_value=5000, step=50)
+        cooldown = await number.new_number(conf["cooldown_time"], setup, SettingKind.COOLDOWN,
+                                           min_value=5, max_value=120, step=1)
+        cg.add(setup.set_setting_numbers(time, tone, cooldown))
         # Keep the original mode and threshold records first. All later generic
         # versions must retain this allocation order and fixed record size.
         cg.add(setup.load_credentials())
